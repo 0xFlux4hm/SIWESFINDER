@@ -1,0 +1,48 @@
+name: SIWES Hunter NG — Telegram Bot
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "bot/**"
+      - "config/**"
+      - "database/**"
+      - "requirements.txt"
+      - "main.py"
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Restore database cache
+        uses: actions/cache@v4
+        with:
+          path: data/siwes_hunter.db
+          key: siwes-db-bot-${{ github.run_id }}
+          restore-keys: |
+            siwes-db-
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Telegram bot
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
+          TELEGRAM_ADMIN_ID: ${{ secrets.TELEGRAM_ADMIN_ID }}
+          LOG_LEVEL: "INFO"
+        run: python main.py --mode bot

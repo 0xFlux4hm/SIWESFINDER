@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  siwes-bot:
+    build: .
+    container_name: siwes-hunter-bot
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHANNEL_ID=${TELEGRAM_CHANNEL_ID}
+      - TELEGRAM_ADMIN_ID=${TELEGRAM_ADMIN_ID}
+      - DATABASE_PATH=/app/data/siwes_hunter.db
+      - LOG_FILE=/app/logs/bot.log
+      - DEBUG=${DEBUG:-False}
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    restart: unless-stopped
+    networks:
+      - siwes-network
+
+networks:
+  siwes-network:
+    driver: bridge
