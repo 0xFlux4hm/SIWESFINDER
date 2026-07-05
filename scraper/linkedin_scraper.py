@@ -1,5 +1,6 @@
 """
-SIWES Hunter NG - Real Multi-Source Scraper
+SIWES Hunter NG - Global-Access Scraper
+Uses job sources accessible from GitHub Actions (US servers).
 """
 import logging
 import time
@@ -7,7 +8,6 @@ import hashlib
 import requests
 from bs4 import BeautifulSoup
 from typing import List
-from datetime import datetime
 from database.models import Job
 from .base_scraper import BaseScraper
 
@@ -19,26 +19,44 @@ HEADERS = {
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/120.0.0.0 Safari/537.36"
     ),
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.5",
-    "Connection": "keep-alive",
+    "Accept": "application/json, text/html, */*",
 }
 
-def _get(url, timeout=20):
+def _get_html(url, timeout=20):
     try:
         r = requests.get(url, headers=HEADERS, timeout=timeout)
         r.raise_for_status()
         return BeautifulSoup(r.text, "html.parser")
     except Exception as e:
-        logger.warning("GET failed %s - %s", url, e)
+        logger.warning("HTML GET failed %s - %s", url, e)
+        return None
+
+def _get_json(url, timeout=20):
+    try:
+        r = requests.get(url, headers=HEADERS, timeout=timeout)
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        logger.warning("JSON GET failed %s - %s", url, e)
         return None
 
 def _clean(text):
     return " ".join(text.split()).strip() if text else ""
 
-def _fingerprint(title, company, location):
+def _fp(title, company, location=""):
     raw = f"{title.lower()}{company.lower()}{location.lower()}"
     return hashlib.md5(raw.encode()).hexdigest()
+
+NIGERIA_KW = ["nigeria","lagos","abuja","kaduna","kano","ibadan","port harcourt","nigerian"]
+INTERN_KW = ["intern","siwes","industrial training","trainee","attachment","graduate trainee","nysc"]
+
+def _is_nigeria(text):
+    t = text.lower()
+    return any(k in t for k in NIGERIA_KW)
+
+def _is_intern(text):
+    t = text.lower()
+    return any(k in t for k in INTERN_KW)
 
 
 class LinkedInScraper(BaseScraper):
@@ -51,19 +69,23 @@ class LinkedInScraper(BaseScraper):
         start_time = time.time()
         seen = set()
 
-        for fn in [
-            self._jobberman,
-            self._myjobmag,
-            self._ngcareers,
-            self._graduatejobs,
-            self._hotnigerianjobs,
-        ]:
+        sources = [
+            self._arbeitnow,
+            self._remotive,
+            self._greenhouse_paystack,
+            self._greenhouse_flutterwave,
+            self._lever_andela,
+            self._google_jobs_rss,
+        ]
+
+        for fn in sources:
             try:
-                for job in fn():
+                results = fn()
+                for job in results:
                     if job.hash not in seen:
                         seen.add(job.hash)
                         jobs.append(job)
-                time.sleep(2)
+                time.sleep(1)
             except Exception as e:
                 logger.error("%s failed: %s", fn.__name__, e)
 
@@ -71,135 +93,151 @@ class LinkedInScraper(BaseScraper):
         self.log_scrape('success', len(jobs), len(jobs), duration=duration)
         return jobs
 
-    def _jobberman(self):
+    def _arbeitnow(self):
         jobs = []
-        for q in ["internship", "industrial-training", "graduate-trainee", "SIWES"]:
-            url = f"https://www.jobberman.com/jobs?q={q}&l=nigeria"
-            soup = _get(url)
-            if not soup:
+        searches = [
+            "https://www.arbeitnow.com/api/job-board-api?search=intern+nigeria",
+            "https://www.arbeitnow.com/api/job-board-api?search=internship+nigeria",
+            "https://www.arbeitnow.com/api/job-board-api?search=SIWES",
+        ]
+        for url in searches:
+            data = _get_json(url)
+            if not data or "data" not in data:
                 continue
-            for card in soup.select("article, .job-card, li.job")[:10]:
-                title_el = card.select_one("h3 a, h2 a, .job-title a")
-                company_el = card.select_one(".company-name, [class*='company']")
-                location_el = card.select_one(".location, [class*='location']")
-                link_el = card.select_one("a[href]")
-                title = _clean(title_el.text) if title_el else ""
-                company = _clean(company_el.text) if company_el else "N/A"
-                location = _clean(location_el.text) if location_el else "Nigeria"
-                link = link_el.get("href", "") if link_el else ""
-                if link.startswith("/"):
-                    link = "https://www.jobberman.com" + link
+            for item in data["data"][:10]:
+                title = _clean(item.get("title", ""))
+                company = _clean(item.get("company_name", "N/A"))
+                location = _clean(item.get("location", "Remote"))
+                link = item.get("url", "")
+                tags = " ".join(item.get("tags", []))
+                desc = item.get("description", "")
                 if not title:
+                    continue
+                if not (_is_nigeria(f"{title} {company} {location} {tags} {desc}") or
+                        _is_intern(f"{title} {tags}")):
                     continue
                 jobs.append(Job(
                     title=title, company=company, location=location,
-                    stipend="See listing", application_link=link or url,
-                    source="Jobberman", job_type="Internship", remote=False,
-                    hash=_fingerprint(title, company, location),
+                    stipend="See listing", application_link=link,
+                    source="Arbeitnow", job_type="Internship",
+                    remote="remote" in location.lower(),
+                    hash=_fp(title, company, location),
                 ))
-            time.sleep(1.5)
-        logger.info("Jobberman: %d jobs", len(jobs))
+            time.sleep(1)
+        logger.info("Arbeitnow: %d jobs", len(jobs))
         return jobs
 
-    def _myjobmag(self):
+    def _remotive(self):
         jobs = []
-        for q in ["internship", "industrial-training", "SIWES"]:
-            url = f"https://www.myjobmag.com/jobs-by-title/{q}"
-            soup = _get(url)
-            if not soup:
+        searches = [
+            "https://remotive.com/api/remote-jobs?search=intern+nigeria&limit=20",
+            "https://remotive.com/api/remote-jobs?category=software-dev&search=intern&limit=20",
+            "https://remotive.com/api/remote-jobs?category=cybersecurity&limit=20",
+        ]
+        for url in searches:
+            data = _get_json(url)
+            if not data or "jobs" not in data:
                 continue
-            for card in soup.select(".job-list-item, article.job, li.job-listing")[:10]:
-                title_el = card.select_one("h2 a, h3 a, .job-title a")
-                company_el = card.select_one(".company-name, .employer")
-                location_el = card.select_one(".location, .job-location")
-                link_el = card.select_one("a[href]")
-                title = _clean(title_el.text) if title_el else ""
-                company = _clean(company_el.text) if company_el else "N/A"
-                location = _clean(location_el.text) if location_el else "Nigeria"
-                link = link_el.get("href", "") if link_el else ""
-                if link.startswith("/"):
-                    link = "https://www.myjobmag.com" + link
+            for item in data["jobs"][:10]:
+                title = _clean(item.get("title", ""))
+                company = _clean(item.get("company_name", "N/A"))
+                location = _clean(item.get("candidate_required_location", "Remote"))
+                link = item.get("url", "")
+                desc = item.get("description", "")
                 if not title:
                     continue
+                if not _is_intern(f"{title} {desc}"):
+                    continue
                 jobs.append(Job(
-                    title=title, company=company, location=location,
-                    stipend="See listing", application_link=link or url,
-                    source="MyJobMag", job_type="Internship", remote=False,
-                    hash=_fingerprint(title, company, location),
+                    title=title, company=company,
+                    location=f"{location} (Remote)",
+                    stipend="See listing", application_link=link,
+                    source="Remotive", job_type="Internship", remote=True,
+                    hash=_fp(title, company, location),
                 ))
-            time.sleep(1.5)
-        logger.info("MyJobMag: %d jobs", len(jobs))
+            time.sleep(1)
+        logger.info("Remotive: %d jobs", len(jobs))
         return jobs
 
-    def _ngcareers(self):
+    def _greenhouse_paystack(self):
+        return self._greenhouse("paystack", "Paystack")
+
+    def _greenhouse_flutterwave(self):
+        return self._greenhouse("flutterwave", "Flutterwave")
+
+    def _greenhouse(self, board_token, company):
         jobs = []
-        url = "https://ngcareers.com/jobs/?s=internship+SIWES"
-        soup = _get(url)
-        if not soup:
+        url = f"https://boards-api.greenhouse.io/v1/boards/{board_token}/jobs"
+        data = _get_json(url)
+        if not data or "jobs" not in data:
             return jobs
-        for card in soup.select("article, .job-listing")[:15]:
-            title_el = card.select_one("h2 a, h3 a")
-            company_el = card.select_one(".company, .employer")
-            location_el = card.select_one(".location")
-            title = _clean(title_el.text) if title_el else ""
-            company = _clean(company_el.text) if company_el else "N/A"
-            location = _clean(location_el.text) if location_el else "Nigeria"
-            link = title_el.get("href", url) if title_el else url
+        for item in data["jobs"][:20]:
+            title = _clean(item.get("title", ""))
+            location = _clean(item.get("location", {}).get("name", "Nigeria"))
+            link = item.get("absolute_url", "")
             if not title:
+                continue
+            if not _is_intern(title):
                 continue
             jobs.append(Job(
                 title=title, company=company, location=location,
-                stipend="See listing", application_link=link,
-                source="NGCareers", job_type="Internship", remote=False,
-                hash=_fingerprint(title, company, location),
+                stipend="Competitive", application_link=link,
+                source=f"Careers ({company})", job_type="Internship",
+                remote="remote" in location.lower(),
+                hash=_fp(title, company, location),
             ))
-        logger.info("NGCareers: %d jobs", len(jobs))
+        logger.info("%s Greenhouse: %d jobs", company, len(jobs))
         return jobs
 
-    def _graduatejobs(self):
+    def _lever_andela(self):
         jobs = []
-        for url in [
-            "https://graduatejobsng.com/category/internship/",
-            "https://graduatejobsng.com/category/graduate-trainee/",
-        ]:
-            soup = _get(url)
-            if not soup:
-                continue
-            for card in soup.select("article, .post")[:10]:
-                title_el = card.select_one("h2 a, h3 a, .entry-title a")
-                title = _clean(title_el.text) if title_el else ""
-                link = title_el.get("href", url) if title_el else url
-                if not title:
-                    continue
-                jobs.append(Job(
-                    title=title, company="See listing", location="Nigeria",
-                    stipend="See listing", application_link=link,
-                    source="GraduateJobsNG", job_type="Internship", remote=False,
-                    hash=_fingerprint(title, "graduatejobsng", url),
-                ))
-            time.sleep(1)
-        logger.info("GraduateJobsNG: %d jobs", len(jobs))
-        return jobs
-
-    def _hotnigerianjobs(self):
-        jobs = []
-        url = "https://www.hotnigerianjobs.com/hotjobs/internship/"
-        soup = _get(url)
-        if not soup:
+        url = "https://api.lever.co/v0/postings/andela?mode=json"
+        data = _get_json(url)
+        if not data:
             return jobs
-        for card in soup.select("article, .job-item, .post")[:10]:
-            title_el = card.select_one("h2 a, h3 a")
-            company_el = card.select_one(".company, .employer")
-            title = _clean(title_el.text) if title_el else ""
-            company = _clean(company_el.text) if company_el else "N/A"
-            link = title_el.get("href", url) if title_el else url
+        for item in data[:20]:
+            title = _clean(item.get("text", ""))
+            location = _clean(item.get("categories", {}).get("location", "Remote"))
+            link = item.get("hostedUrl", "")
             if not title:
                 continue
+            if not _is_intern(title):
+                continue
             jobs.append(Job(
-                title=title, company=company, location="Nigeria",
-                stipend="See listing", application_link=link,
-                source="HotNigerianJobs", job_type="Internship", remote=False,
-                hash=_fingerprint(title, company, "nigeria"),
+                title=title, company="Andela", location=location,
+                stipend="Competitive", application_link=link,
+                source="Careers (Andela)", job_type="Internship",
+                remote=True, hash=_fp(title, "andela", location),
             ))
-        logger.info("HotNigerianJobs: %d jobs", len(jobs))
+        logger.info("Andela Lever: %d jobs", len(jobs))
+        return jobs
+
+    def _google_jobs_rss(self):
+        jobs = []
+        queries = [
+            "SIWES+internship+Nigeria+2026",
+            "industrial+training+Nigeria+tech+2026",
+            "graduate+trainee+Nigeria+fintech+2026",
+        ]
+        for q in queries:
+            url = f"https://news.google.com/rss/search?q={q}&hl=en-NG&gl=NG&ceid=NG:en"
+            soup = _get_html(url)
+            if not soup:
+                continue
+            for item in soup.select("item")[:8]:
+                title_el = item.find("title")
+                link_el = item.find("link")
+                title = _clean(title_el.text) if title_el else ""
+                link = link_el.text if link_el else ""
+                if not title or not _is_intern(title):
+                    continue
+                jobs.append(Job(
+                    title=title, company="See article",
+                    location="Nigeria", stipend="See listing",
+                    application_link=link,
+                    source="Google News", job_type="Internship",
+                    remote=False, hash=_fp(title, "googlenews", q),
+                ))
+            time.sleep(1)
+        logger.info("Google News: %d jobs", len(jobs))
         return jobs
