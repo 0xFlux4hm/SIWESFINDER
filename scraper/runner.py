@@ -32,16 +32,16 @@ class ScraperRunner:
                         if job_id:
                             new_jobs += 1
                             new_job_objects.append(job)
+                    else:
+                        # Job exists but collect it for sending
+                        new_job_objects.append(job)
             except Exception as e:
                 logger.error(f"Scraper error: {e}")
 
         logger.info(f"Total: {total_jobs} found, {new_jobs} new")
 
-        # Always send top jobs even if not new
-        jobs_to_send = new_job_objects if new_job_objects else self.db_manager.get_all_jobs(limit=8)
-
-        if jobs_to_send:
-            self._send(jobs_to_send)
+        if new_job_objects:
+            self._send(new_job_objects[:8])
         else:
             logger.info("No jobs to send")
 
@@ -65,7 +65,7 @@ class ScraperRunner:
                     "parse_mode": "HTML",
                     "disable_web_page_preview": True
                 }, timeout=30)
-                logger.info(f"Telegram response: {r.status_code} {r.text[:100]}")
+                logger.info(f"Telegram: {r.status_code}")
                 return r.ok
             except Exception as e:
                 logger.error(f"Post failed: {e}")
@@ -80,7 +80,7 @@ class ScraperRunner:
         time.sleep(1)
 
         sent = 0
-        for i, job in enumerate(jobs[:8], 1):
+        for i, job in enumerate(jobs, 1):
             title = getattr(job, 'title', 'N/A')
             company = getattr(job, 'company', 'N/A')
             location = getattr(job, 'location', 'Nigeria')
