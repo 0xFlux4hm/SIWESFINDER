@@ -1,6 +1,6 @@
 """
 SIWES Hunter NG - Complete Nigerian Job Scraper
-Sources: Remotive, Arbeitnow, Google News RSS, 
+Sources: Remotive, Arbeitnow, Google News RSS,
 Nigerian company career pages, Government portals
 """
 import logging
@@ -72,6 +72,25 @@ def _get_json(url, timeout=20):
         return None
 
 
+def _resolve_url(url, timeout=10):
+    """Follow Google News redirects to get real article URL."""
+    if not url:
+        return url
+    try:
+        r = requests.head(
+            url, headers=HEADERS, timeout=timeout, allow_redirects=True
+        )
+        final = r.url
+        if "google.com" not in final:
+            return final
+        r2 = requests.get(
+            url, headers=HEADERS, timeout=timeout, allow_redirects=True
+        )
+        return r2.url
+    except Exception:
+        return url
+
+
 def _clean(text):
     return " ".join(str(text).split()).strip() if text else ""
 
@@ -136,9 +155,6 @@ class LinkedInScraper(BaseScraper):
             self._google_news_siwes,
             self._google_news_internship,
             self._google_news_companies,
-            self._mtn_careers,
-            self._gtbank_careers,
-            self._dangote_careers,
             self._nairaland_jobs,
             self._scholarshipregion,
         ]
@@ -157,8 +173,6 @@ class LinkedInScraper(BaseScraper):
         duration = time.time() - start_time
         self.log_scrape('success', len(jobs), len(jobs), duration=duration)
         return jobs
-
-    # ── REMOTIVE ──────────────────────────────────────────────────────────
 
     def _remotive(self):
         jobs = []
@@ -182,7 +196,6 @@ class LinkedInScraper(BaseScraper):
                 link = item.get("url", "")
                 desc = item.get("description", "")
                 tags = " ".join(item.get("tags", []))
-                pub_date = item.get("publication_date", "")[:10]
 
                 if not title:
                     continue
@@ -206,8 +219,6 @@ class LinkedInScraper(BaseScraper):
             time.sleep(1)
         logger.info("Remotive: %d jobs", len(jobs))
         return jobs
-
-    # ── ARBEITNOW ─────────────────────────────────────────────────────────
 
     def _arbeitnow(self):
         jobs = []
@@ -233,8 +244,9 @@ class LinkedInScraper(BaseScraper):
                 if not title:
                     continue
                 if not (
-                    _is_nigeria(f"{title} {company} {location} {tags} {desc}") or
-                    _is_intern(f"{title} {tags}")
+                    _is_nigeria(
+                        f"{title} {company} {location} {tags} {desc}"
+                    ) or _is_intern(f"{title} {tags}")
                 ):
                     continue
 
@@ -256,8 +268,6 @@ class LinkedInScraper(BaseScraper):
         logger.info("Arbeitnow: %d jobs", len(jobs))
         return jobs
 
-    # ── GOOGLE NEWS — SIWES ───────────────────────────────────────────────
-
     def _google_news_siwes(self):
         jobs = []
         queries = [
@@ -274,16 +284,15 @@ class LinkedInScraper(BaseScraper):
             soup = _get_html(url)
             if not soup:
                 continue
-            for item in soup.select("item")[:6]:
+            for item in soup.select("item")[:5]:
                 title_el = item.find("title")
                 link_el = item.find("link")
                 desc_el = item.find("description")
-                pub_el = item.find("pubdate")
 
                 title = _clean(title_el.text) if title_el else ""
-                link = link_el.text if link_el else ""
+                raw_link = link_el.text if link_el else ""
+                link = _resolve_url(raw_link) if raw_link else ""
                 desc = _clean(desc_el.text) if desc_el else ""
-                pub = _clean(pub_el.text)[:16] if pub_el else ""
 
                 if not title or not _is_intern(title):
                     continue
@@ -304,8 +313,6 @@ class LinkedInScraper(BaseScraper):
             time.sleep(1)
         logger.info("Google News SIWES: %d jobs", len(jobs))
         return jobs
-
-    # ── GOOGLE NEWS — INTERNSHIP ──────────────────────────────────────────
 
     def _google_news_internship(self):
         jobs = []
@@ -331,7 +338,8 @@ class LinkedInScraper(BaseScraper):
                 desc_el = item.find("description")
 
                 title = _clean(title_el.text) if title_el else ""
-                link = link_el.text if link_el else ""
+                raw_link = link_el.text if link_el else ""
+                link = _resolve_url(raw_link) if raw_link else ""
                 desc = _clean(desc_el.text) if desc_el else ""
 
                 if not title or not _is_intern(title):
@@ -355,31 +363,31 @@ class LinkedInScraper(BaseScraper):
         logger.info("Google News Internship: %d jobs", len(jobs))
         return jobs
 
-    # ── GOOGLE NEWS — TOP COMPANIES ───────────────────────────────────────
-
     def _google_news_companies(self):
         jobs = []
         companies = [
-            "MTN+Nigeria+internship+2026",
-            "Airtel+Nigeria+internship+2026",
-            "GTBank+internship+2026",
-            "Access+Bank+internship+2026",
-            "Zenith+Bank+internship+2026",
-            "UBA+internship+2026",
-            "Dangote+internship+2026",
-            "Shell+Nigeria+SIWES+2026",
-            "TotalEnergies+Nigeria+internship+2026",
-            "Chevron+Nigeria+internship+2026",
-            "Flutterwave+internship+2026",
-            "Paystack+internship+2026",
-            "Interswitch+internship+2026",
-            "NITDA+internship+2026",
-            "NCC+internship+2026",
-            "First+Bank+Nigeria+internship+2026",
-            "Nestlé+Nigeria+SIWES+2026",
-            "Unilever+Nigeria+internship+2026",
+            ("MTN+Nigeria+internship+2026", "MTN Nigeria"),
+            ("Airtel+Nigeria+internship+2026", "Airtel Nigeria"),
+            ("GTBank+internship+2026", "GTBank"),
+            ("Access+Bank+internship+2026", "Access Bank"),
+            ("Zenith+Bank+internship+2026", "Zenith Bank"),
+            ("UBA+internship+2026", "UBA"),
+            ("Dangote+internship+2026", "Dangote Group"),
+            ("Shell+Nigeria+SIWES+2026", "Shell Nigeria"),
+            ("TotalEnergies+Nigeria+internship+2026", "TotalEnergies"),
+            ("Chevron+Nigeria+internship+2026", "Chevron Nigeria"),
+            ("Flutterwave+internship+2026", "Flutterwave"),
+            ("Paystack+internship+2026", "Paystack"),
+            ("Interswitch+internship+2026", "Interswitch"),
+            ("NITDA+internship+2026", "NITDA"),
+            ("NCC+internship+2026", "NCC Nigeria"),
+            ("First+Bank+Nigeria+internship+2026", "First Bank"),
+            ("Nestle+Nigeria+SIWES+2026", "Nestlé Nigeria"),
+            ("Unilever+Nigeria+internship+2026", "Unilever Nigeria"),
+            ("Stanbic+IBTC+internship+2026", "Stanbic IBTC"),
+            ("Kuda+Bank+internship+2026", "Kuda Bank"),
         ]
-        for q in companies:
+        for q, company_name in companies:
             url = (
                 f"https://news.google.com/rss/search?q={q}"
                 f"&hl=en-NG&gl=NG&ceid=NG:en"
@@ -393,13 +401,13 @@ class LinkedInScraper(BaseScraper):
                 desc_el = item.find("description")
 
                 title = _clean(title_el.text) if title_el else ""
-                link = link_el.text if link_el else ""
+                raw_link = link_el.text if link_el else ""
+                link = _resolve_url(raw_link) if raw_link else ""
                 desc = _clean(desc_el.text) if desc_el else ""
 
                 if not title or not _is_intern(title):
                     continue
 
-                company_name = q.split("+")[0]
                 stipend = _extract_stipend(f"{title} {desc}")
 
                 jobs.append(Job(
@@ -416,90 +424,6 @@ class LinkedInScraper(BaseScraper):
             time.sleep(0.5)
         logger.info("Google News Companies: %d jobs", len(jobs))
         return jobs
-
-    # ── MTN CAREERS ───────────────────────────────────────────────────────
-
-    def _mtn_careers(self):
-        jobs = []
-        url = "https://www.mtnonline.com/careers/"
-        soup = _get_html(url)
-        if not soup:
-            return jobs
-        for card in soup.select("article, .job, .career-item, .vacancy")[:10]:
-            title_el = card.select_one("h2 a, h3 a, .title a")
-            title = _clean(title_el.text) if title_el else ""
-            link = title_el.get("href", url) if title_el else url
-            if not title or not _is_intern(title):
-                continue
-            jobs.append(Job(
-                title=title,
-                company="MTN Nigeria",
-                location="Lagos, Nigeria",
-                stipend="Competitive",
-                application_link=link,
-                source="MTN Careers",
-                job_type="Internship",
-                remote=False,
-                hash=_fp(title, "mtn", "lagos"),
-            ))
-        logger.info("MTN Careers: %d jobs", len(jobs))
-        return jobs
-
-    # ── GTBANK CAREERS ────────────────────────────────────────────────────
-
-    def _gtbank_careers(self):
-        jobs = []
-        url = "https://www.gtbank.com/about-us/careers"
-        soup = _get_html(url)
-        if not soup:
-            return jobs
-        for card in soup.select(".job, .career, article, .vacancy")[:10]:
-            title_el = card.select_one("h2 a, h3 a, .title")
-            title = _clean(title_el.text) if title_el else ""
-            if not title or not _is_intern(title):
-                continue
-            jobs.append(Job(
-                title=title,
-                company="GTBank",
-                location="Lagos, Nigeria",
-                stipend="Competitive",
-                application_link=url,
-                source="GTBank Careers",
-                job_type="Internship",
-                remote=False,
-                hash=_fp(title, "gtbank", "lagos"),
-            ))
-        logger.info("GTBank Careers: %d jobs", len(jobs))
-        return jobs
-
-    # ── DANGOTE CAREERS ───────────────────────────────────────────────────
-
-    def _dangote_careers(self):
-        jobs = []
-        url = "https://www.dangote.com/careers/"
-        soup = _get_html(url)
-        if not soup:
-            return jobs
-        for card in soup.select(".job, .career, article, .vacancy")[:10]:
-            title_el = card.select_one("h2 a, h3 a, .title a")
-            title = _clean(title_el.text) if title_el else ""
-            if not title or not _is_intern(title):
-                continue
-            jobs.append(Job(
-                title=title,
-                company="Dangote Group",
-                location="Nigeria",
-                stipend="Competitive",
-                application_link=url,
-                source="Dangote Careers",
-                job_type="Internship",
-                remote=False,
-                hash=_fp(title, "dangote", "nigeria"),
-            ))
-        logger.info("Dangote Careers: %d jobs", len(jobs))
-        return jobs
-
-    # ── NAIRALAND JOBS ────────────────────────────────────────────────────
 
     def _nairaland_jobs(self):
         jobs = []
@@ -534,8 +458,6 @@ class LinkedInScraper(BaseScraper):
         logger.info("Nairaland: %d jobs", len(jobs))
         return jobs
 
-    # ── SCHOLARSHIP REGION ────────────────────────────────────────────────
-
     def _scholarshipregion(self):
         jobs = []
         searches = [
@@ -548,7 +470,9 @@ class LinkedInScraper(BaseScraper):
             if not soup:
                 continue
             for card in soup.select("article, .post")[:6]:
-                title_el = card.select_one("h2 a, h3 a, .entry-title a")
+                title_el = card.select_one(
+                    "h2 a, h3 a, .entry-title a"
+                )
                 title = _clean(title_el.text) if title_el else ""
                 link = title_el.get("href", url) if title_el else url
                 if not title or not _is_intern(title):
