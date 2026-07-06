@@ -1,7 +1,3 @@
-                    
-"""
-Scraper runner - orchestrates all scrapers and sends Telegram alerts
-"""
 import logging
 import time
 import requests
@@ -17,9 +13,6 @@ class ScraperRunner:
     def __init__(self, db_manager=None):
         self.db_manager = db_manager or DatabaseManager()
         self.scrapers = []
-        self._initialize_scrapers()
-
-    def _initialize_scrapers(self):
         if settings.ENABLE_LINKEDIN:
             self.scrapers.append(LinkedInScraper())
         logger.info(f"Initialized {len(self.scrapers)} scrapers")
@@ -28,8 +21,6 @@ class ScraperRunner:
         total_jobs = 0
         new_jobs = 0
         new_job_objects = []
-
-        logger.info("Starting scraper run...")
 
         for scraper in self.scrapers:
             try:
@@ -42,59 +33,68 @@ class ScraperRunner:
                             new_jobs += 1
                             new_job_objects.append(job)
             except Exception as e:
-                logger.error(f"Error running {scraper.name}: {e}")
+                logger.error(f"Scraper error: {e}")
 
-        logger.info(f"Scraper run complete: {total_jobs} jobs found, {new_jobs} new jobs added")
+        logger.info(f"Total: {total_jobs} found, {new_jobs} new")
 
-        if new_job_objects and settings.TELEGRAM_CHANNEL_ID and settings.TELEGRAM_BOT_TOKEN:
-            self._send_alerts_sync(new_job_objects)
+        # Always send top jobs even if not new
+        jobs_to_send = new_job_objects if new_job_objects else self.db_manager.get_all_jobs(limit=8)
+
+        if jobs_to_send:
+            self._send(jobs_to_send)
         else:
-            logger.info("No new jobs to alert or credentials not set")
+            logger.info("No jobs to send")
 
         return total_jobs, new_jobs
 
-    def _send_alerts_sync(self, jobs):
+    def _send(self, jobs):
         token = settings.TELEGRAM_BOT_TOKEN
         channel = settings.TELEGRAM_CHANNEL_ID
-        max_alerts = settings.MAX_ALERTS_PER_RUN
-        base_url = f"https://api.telegram.org/bot{token}/sendMessage"
 
-        def send(text):
+        if not token or not channel:
+            logger.error("TOKEN or CHANNEL missing!")
+            return
+
+        base = "https://api.telegram.org/bot" + token + "/sendMessage"
+
+        def post(text):
             try:
-                resp = requests.post(base_url, json={
+                r = requests.post(base, json={
                     "chat_id": channel,
                     "text": text,
                     "parse_mode": "HTML",
-                    "disable_web_page_preview": True,
+                    "disable_web_page_preview": True
                 }, timeout=30)
-                if not resp.ok:
-                    logger.error(f"Telegram error: {resp.text}")
-                return resp.ok
+                logger.info(f"Telegram response: {r.status_code} {r.text[:100]}")
+                return r.ok
             except Exception as e:
-                logger.error(f"Send failed: {e}")
+                logger.error(f"Post failed: {e}")
                 return False
 
-        send(
-            f"🚨 <b>SIWES Hunter NG — {len(jobs)} New Opportunities!</b>\n\n"
-            f"🤖 Auto-scraped and AI ranked\n"
-            f"📅 Fresh opportunities just found\n\n"
-            f"👇 Scroll down for details"
+        post(
+            f"🚨 <b>SIWES Hunter NG</b>\n\n"
+            f"📡 {len(jobs)} opportunities found!\n"
+            f"🤖 AI ranked and verified\n"
+            f"👇 Details below"
         )
         time.sleep(1)
 
         sent = 0
-        for i, job in enumerate(jobs[:max_alerts], 1):
-            stipend = getattr(job, 'stipend', 'See listing') or 'See listing'
-            location = getattr(job, 'location', 'Nigeria') or 'Nigeria'
-            remote_tag = "🌐 Remote" if getattr(job, 'remote', False) else ""
-            source = getattr(job, 'source', 'Job Board') or 'Job Board'
-            link = getattr(job, 'application_link', '') or ''
+        for i, job in enumerate(jobs[:8], 1):
+            title = getattr(job, 'title', 'N/A')
+            company = getattr(job, 'company', 'N/A')
+            location = getattr(job, 'location', 'Nigeria')
+            stipend = getattr(job, 'stipend', 'See listing')
+            source = getattr(job, 'source', 'Job Board')
+            link = getattr(job, 'application_link', '')
+            remote = getattr(job, 'remote', False)
+            remote_tag = "🌐 Remote" if remote else ""
 
             text = (
                 f"🚨 <b>OPPORTUNITY #{i}</b>\n"
                 f"━━━━━━━━━━━━━━\n"
-                f"🏢 <b>Company:</b> {job.company}\n"
-                f"💼 <b>Position:</b> {job.title}\n"
+                f"🏢 <b>Company:</b> {company}\n"
+                f"💼 <b>Position:</b> {title}\n"
                 f"📍 <b>Location:</b> {location} {remote_tag}\n"
                 f"💰 <b>Stipend:</b> {stipend}\n"
                 f"📡 <b>Source:</b> {source}\n"
@@ -102,8 +102,8 @@ class ScraperRunner:
                 f"━━━━━━━━━━━━━━"
             )
 
-            if send(text):
+            if post(text):
                 sent += 1
-            time.sleep(1.5)
+            time.sleep(2)
 
-        logger.info(f"Alerts sent: {sent}/{min(len(jobs), max_alerts)}")
+        logger.info(f"✅ Sent {sent} alerts to channel")
