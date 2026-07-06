@@ -11,7 +11,11 @@ logger = logging.getLogger(__name__)
 def clean(text):
     if not text:
         return "N/A"
-    return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").strip()
+    return (str(text)
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .strip())
 
 
 class ScraperRunner:
@@ -43,13 +47,13 @@ class ScraperRunner:
         logger.info(f"Total: {total_jobs} found, {new_jobs} new")
 
         if all_jobs:
-            self._send(all_jobs[:8])
+            self._send_digest(all_jobs[:10])
         else:
             logger.info("No jobs to send")
 
         return total_jobs, new_jobs
 
-    def _send(self, jobs):
+    def _send_digest(self, jobs):
         token = settings.TELEGRAM_BOT_TOKEN
         channel = settings.TELEGRAM_CHANNEL_ID
 
@@ -75,11 +79,18 @@ class ScraperRunner:
                 logger.error(f"Post failed: {e}")
                 return False
 
+        from datetime import datetime
+        now = datetime.utcnow().strftime("%d %b %Y • %H:%M UTC")
+
+        # Send header
         post(
-            f"🚨 <b>SIWES Hunter NG</b>\n\n"
-            f"📡 {len(jobs)} opportunities found!\n"
-            f"🤖 AI ranked and verified\n"
-            f"👇 Details below"
+            f"🇳🇬 <b>SIWES FINDER NG — Daily Alert</b>\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"📅 {now}\n"
+            f"📊 {len(jobs)} opportunities found\n"
+            f"🤖 AI-ranked for CS students\n"
+            f"━━━━━━━━━━━━━━━━━━\n\n"
+            f"👇 Scroll down for details"
         )
         time.sleep(1)
 
@@ -92,22 +103,35 @@ class ScraperRunner:
             source = clean(getattr(job, 'source', 'Job Board'))
             link = str(getattr(job, 'application_link', '') or '')
             remote = getattr(job, 'remote', False)
-            remote_tag = "🌐 Remote" if remote else ""
+            job_type = clean(getattr(job, 'job_type', 'Internship'))
+
+            remote_badge = "🌐 <b>REMOTE</b>" if remote else "🏢 <b>ON-SITE</b>"
 
             text = (
-                f"🚨 <b>OPPORTUNITY #{i}</b>\n"
+                f"{'🔐' if 'Cyber' in source else '💻' if 'Software' in source else '📊' if 'Data' in source else '🎯'} "
+                f"<b>OPPORTUNITY #{i}</b> — {remote_badge}\n"
                 f"━━━━━━━━━━━━━━\n"
                 f"🏢 <b>Company:</b> {company}\n"
-                f"💼 <b>Position:</b> {title}\n"
-                f"📍 <b>Location:</b> {location} {remote_tag}\n"
+                f"💼 <b>Role:</b> {title}\n"
+                f"📍 <b>Location:</b> {location}\n"
                 f"💰 <b>Stipend:</b> {stipend}\n"
+                f"🏷 <b>Type:</b> {job_type}\n"
                 f"📡 <b>Source:</b> {source}\n"
-                f"🔗 <b>Apply:</b> {link}\n"
+                f"🔗 <b>Apply Now:</b> {link}\n"
                 f"━━━━━━━━━━━━━━"
             )
 
             if post(text):
                 sent += 1
             time.sleep(2)
+
+        # Footer
+        post(
+            f"✅ <b>End of Alert — {sent} opportunities sent</b>\n\n"
+            f"🔔 Next update in a few hours\n"
+            f"📢 Share this channel: @techdroidkey\n"
+            f"🤖 Bot: @Siwesalartbot\n\n"
+            f"<i>Built for Nigerian CS students 🇳🇬</i>"
+        )
 
         logger.info(f"✅ Sent {sent} alerts to channel")
