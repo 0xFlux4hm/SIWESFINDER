@@ -159,7 +159,7 @@ class ScraperRunner:
         post(
             f"✅ <b>{sent} opportunities delivered</b>\n\n"
             f"🔔 Next update in a few hours\n"
-            f"📢 Share: @SIWESFINDER\n"
+            f"📢 Share: @techdroidkey\n"
             f"🤖 Bot commands: @Siwesalartbot\n\n"
             f"💡 <b>Commands:</b>\n"
             f"/today — Today's jobs\n"
