@@ -1,8 +1,10 @@
 import logging
 import time
 import requests
+from datetime import datetime
 from database.manager import DatabaseManager
 from .linkedin_scraper import LinkedInScraper
+from .gemini_scraper import scrape_gemini
 from config.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -32,6 +34,7 @@ class ScraperRunner:
         new_jobs = 0
         all_jobs = []
 
+        # Run web scrapers
         for scraper in self.scrapers:
             try:
                 jobs = scraper.scrape()
@@ -43,6 +46,19 @@ class ScraperRunner:
                         new_jobs += 1
             except Exception as e:
                 logger.error(f"Scraper error: {e}")
+
+        # Run Gemini AI scraper
+        try:
+            gemini_jobs = scrape_gemini()
+            total_jobs += len(gemini_jobs)
+            for job in gemini_jobs:
+                all_jobs.append(job)
+                if not self.db_manager.job_exists(job.hash):
+                    self.db_manager.add_job(job)
+                    new_jobs += 1
+            logger.info(f"Gemini added {len(gemini_jobs)} jobs")
+        except Exception as e:
+            logger.error(f"Gemini error: {e}")
 
         logger.info(f"Total: {total_jobs} found, {new_jobs} new")
 
@@ -79,16 +95,15 @@ class ScraperRunner:
                 logger.error(f"Post failed: {e}")
                 return False
 
-        from datetime import datetime
         now = datetime.utcnow().strftime("%d %b %Y • %H:%M UTC")
 
-        # Send header
+        # Header
         post(
             f"🇳🇬 <b>SIWES FINDER NG — Daily Alert</b>\n"
             f"━━━━━━━━━━━━━━━━━━\n"
             f"📅 {now}\n"
             f"📊 {len(jobs)} opportunities found\n"
-            f"🤖 AI-ranked for CS students\n"
+            f"🤖 Powered by AI + Web Scraping\n"
             f"━━━━━━━━━━━━━━━━━━\n\n"
             f"👇 Scroll down for details"
         )
@@ -105,11 +120,26 @@ class ScraperRunner:
             remote = getattr(job, 'remote', False)
             job_type = clean(getattr(job, 'job_type', 'Internship'))
 
-            remote_badge = "🌐 <b>REMOTE</b>" if remote else "🏢 <b>ON-SITE</b>"
+            remote_badge = "🌐 REMOTE" if remote else "🏢 ON-SITE"
+
+            # Pick emoji based on source/category
+            if 'Cyber' in source or 'Security' in title:
+                emoji = "🔐"
+            elif 'Software' in source or 'Engineer' in title:
+                emoji = "💻"
+            elif 'Data' in source or 'AI' in source:
+                emoji = "📊"
+            elif 'Gemini' in source:
+                emoji = "🤖"
+            elif 'Bank' in company or 'Finance' in title:
+                emoji = "🏦"
+            elif 'Oil' in title or 'Gas' in title or 'Energy' in company:
+                emoji = "🛢"
+            else:
+                emoji = "🎯"
 
             text = (
-                f"{'🔐' if 'Cyber' in source else '💻' if 'Software' in source else '📊' if 'Data' in source else '🎯'} "
-                f"<b>OPPORTUNITY #{i}</b> — {remote_badge}\n"
+                f"{emoji} <b>OPPORTUNITY #{i}</b> — {remote_badge}\n"
                 f"━━━━━━━━━━━━━━\n"
                 f"🏢 <b>Company:</b> {company}\n"
                 f"💼 <b>Role:</b> {title}\n"
@@ -117,7 +147,7 @@ class ScraperRunner:
                 f"💰 <b>Stipend:</b> {stipend}\n"
                 f"🏷 <b>Type:</b> {job_type}\n"
                 f"📡 <b>Source:</b> {source}\n"
-                f"🔗 <b>Apply Now:</b> {link}\n"
+                f"🔗 <b>Apply:</b> {link}\n"
                 f"━━━━━━━━━━━━━━"
             )
 
@@ -127,10 +157,16 @@ class ScraperRunner:
 
         # Footer
         post(
-            f"✅ <b>End of Alert — {sent} opportunities sent</b>\n\n"
+            f"✅ <b>{sent} opportunities delivered</b>\n\n"
             f"🔔 Next update in a few hours\n"
-            f"📢 Share this channel: @techdroidkey\n"
-            f"🤖 Bot: @Siwesalartbot\n\n"
+            f"📢 Share: @SIWESFINDER\n"
+            f"🤖 Bot commands: @Siwesalartbot\n\n"
+            f"💡 <b>Commands:</b>\n"
+            f"/today — Today's jobs\n"
+            f"/cyber — Cybersecurity roles\n"
+            f"/software — Software roles\n"
+            f"/lagos — Lagos opportunities\n"
+            f"/stipend — Paid roles only\n\n"
             f"<i>Built for Nigerian CS students 🇳🇬</i>"
         )
 
