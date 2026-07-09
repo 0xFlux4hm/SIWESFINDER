@@ -1,7 +1,7 @@
 """
 SIWES Hunter NG - Gemini AI Scraper
-Uses Google Gemini free API to find SIWES/internship opportunities.
-Free tier: 15 requests/minute, 1M tokens/day
+Uses Google Gemini 2.0 Flash (free tier)
+Free: 15 requests/minute, 1M tokens/day
 """
 import logging
 import time
@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 GEMINI_URL = (
     "https://generativelanguage.googleapis.com/v1beta/models/"
-    "gemini-1.5-flash:generateContent"
+    "gemini-2.0-flash:generateContent"
 )
 
 PROMPTS = [
@@ -25,7 +25,7 @@ List 10 current SIWES and Industrial Training opportunities
 for Nigerian Computer Science students in 2026.
 Focus on: Paystack, Flutterwave, MTN, Airtel, GTBank,
 Access Bank, Zenith Bank, Shell, TotalEnergies, Chevron,
-NITDA, NCC, Dangote, Nestlé, Unilever, Kuda, Interswitch.
+NITDA, NCC, Dangote, Nestle, Unilever, Kuda, Interswitch.
 Format as JSON array with these exact fields:
 title, company, location, stipend, apply_url, deadline
 Return ONLY the JSON array. No explanation. No markdown.
@@ -55,6 +55,7 @@ List 10 Oil and Gas, Telecom, and Banking student
 internship and SIWES attachment programs in Nigeria 2026.
 Include Shell, TotalEnergies, Chevron, NNPC, MTN, Airtel,
 GTBank, UBA, First Bank, Zenith Bank programs.
+Include real application website URLs.
 Format as JSON array with these exact fields:
 title, company, location, stipend, apply_url, deadline
 Return ONLY the JSON array. No explanation. No markdown.
@@ -94,7 +95,7 @@ def _ask_gemini(prompt: str) -> list:
         if not response.ok:
             logger.error(
                 f"Gemini error: {response.status_code} "
-                f"{response.text[:200]}"
+                f"{response.text[:300]}"
             )
             return []
 
@@ -165,6 +166,10 @@ def scrape_gemini() -> list:
                 display_title = title
                 if deadline:
                     display_title = f"{title} — Deadline: {deadline}"
+
+                # Fix empty or invalid URLs
+                if not apply_url or apply_url in ["N/A", "TBD", ""]:
+                    apply_url = f"https://www.google.com/search?q={company.replace(' ', '+')}+internship+Nigeria+2026"
 
                 jobs.append(Job(
                     title=display_title,
