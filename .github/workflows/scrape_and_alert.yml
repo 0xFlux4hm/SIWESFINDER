@@ -2,10 +2,10 @@ name: SIWES Hunter NG — Scrape & Alert
 
 on:
   schedule:
-    - cron: "0 7 * * *"    # 8 AM WAT (7 AM UTC)
-    - cron: "0 13 * * *"   # 2 PM WAT (1 PM UTC)
-    - cron: "0 19 * * *"   # 8 PM WAT (7 PM UTC)
-  workflow_dispatch:        # manual trigger from GitHub UI
+    - cron: "0 7 * * *"
+    - cron: "0 13 * * *"
+    - cron: "0 19 * * *"
+  workflow_dispatch:
 
 jobs:
   scrape-and-alert:
@@ -40,8 +40,10 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
           TELEGRAM_ADMIN_ID: ${{ secrets.TELEGRAM_ADMIN_ID }}
-          MAX_ALERTS_PER_RUN: "8"
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          MAX_ALERTS_PER_RUN: "10"
           LOG_LEVEL: "INFO"
+          ENABLE_GEMINI: "True"
         run: python main.py --mode scrape
 
       - name: Upload database backup
