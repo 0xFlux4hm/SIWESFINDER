@@ -1,7 +1,7 @@
 """
 SIWES Hunter NG - Gemini AI Scraper
-Uses Google Gemini 2.0 Flash (free tier)
-Free: 15 requests/minute, 1M tokens/day
+Optimized: Only 1 API request per run to stay within free limits.
+Free tier: 15 requests/minute, 1,500/day — we use only 3/day
 """
 import logging
 import time
@@ -9,6 +9,7 @@ import hashlib
 import requests
 import json
 import re
+from datetime import datetime
 from database.models import Job
 from config.settings import settings
 
@@ -19,48 +20,47 @@ GEMINI_URL = (
     "gemini-2.0-flash:generateContent"
 )
 
-PROMPTS = [
-    """
-List 10 current SIWES and Industrial Training opportunities
-for Nigerian Computer Science students in 2026.
-Focus on: Paystack, Flutterwave, MTN, Airtel, GTBank,
-Access Bank, Zenith Bank, Shell, TotalEnergies, Chevron,
-NITDA, NCC, Dangote, Nestle, Unilever, Kuda, Interswitch.
-Format as JSON array with these exact fields:
+# Rotate prompts based on time of day
+# 8AM = SIWES focus, 2PM = Tech focus, 8PM = Banking/Oil focus
+def _get_prompt():
+    hour = datetime.utcnow().hour
+    if hour < 12:
+        return """
+List 15 current SIWES, Industrial Training and Internship
+opportunities for Nigerian Computer Science students in 2026.
+Include opportunities from MTN, Airtel, GTBank, Access Bank,
+Zenith Bank, UBA, First Bank, Paystack, Flutterwave, Shell,
+TotalEnergies, Chevron, Dangote, Nestle, NITDA, NCC, Kuda.
+For each include real application website URL.
+Format as JSON array with fields:
 title, company, location, stipend, apply_url, deadline
-Return ONLY the JSON array. No explanation. No markdown.
-""",
-
-    """
-List 10 Internship and Graduate Trainee programs open to
-Nigerian university students in technology and finance in 2026.
-Include both Lagos and Abuja opportunities.
-Include stipend amounts where known in Nigerian Naira.
-Format as JSON array with these exact fields:
+Return ONLY the JSON array. No markdown. No explanation.
+"""
+    elif hour < 18:
+        return """
+List 15 Software Engineering, Cybersecurity, Data Analysis,
+Networking and IT internship opportunities for Nigerian
+students in 2026. Include both remote and on-site roles.
+Include opportunities from tech companies, startups and
+multinational companies operating in Nigeria.
+For each include real application website URL.
+Format as JSON array with fields:
 title, company, location, stipend, apply_url, deadline
-Return ONLY the JSON array. No explanation. No markdown.
-""",
-
-    """
-List 10 Cybersecurity, Software Engineering, Data Analysis,
-and Networking internship roles available for Nigerian
-students in 2026. Include remote opportunities.
-Format as JSON array with these exact fields:
+Return ONLY the JSON array. No markdown. No explanation.
+"""
+    else:
+        return """
+List 15 Graduate Trainee and Internship programs currently
+open in Nigeria for 2026. Focus on Banking, Oil and Gas,
+Telecom and Government agencies. Include GTBank, Zenith Bank,
+UBA, Access Bank, First Bank, Shell, TotalEnergies, Chevron,
+NNPC, MTN, Airtel, NITDA, NCC, Dangote, Nestle programs.
+Include real stipend amounts in Naira where known.
+For each include real application website URL.
+Format as JSON array with fields:
 title, company, location, stipend, apply_url, deadline
-Return ONLY the JSON array. No explanation. No markdown.
-""",
-
-    """
-List 10 Oil and Gas, Telecom, and Banking student
-internship and SIWES attachment programs in Nigeria 2026.
-Include Shell, TotalEnergies, Chevron, NNPC, MTN, Airtel,
-GTBank, UBA, First Bank, Zenith Bank programs.
-Include real application website URLs.
-Format as JSON array with these exact fields:
-title, company, location, stipend, apply_url, deadline
-Return ONLY the JSON array. No explanation. No markdown.
-""",
-]
+Return ONLY the JSON array. No markdown. No explanation.
+"""
 
 
 def _fp(title, company, location=""):
@@ -142,53 +142,55 @@ def scrape_gemini() -> list:
     jobs = []
     seen = set()
 
-    for i, prompt in enumerate(PROMPTS):
-        logger.info(f"Gemini prompt {i+1}/{len(PROMPTS)}...")
-        results = _ask_gemini(prompt)
+    # Only 1 request per run — stays well within free limits
+    prompt = _get_prompt()
+    logger.info("Gemini AI: sending 1 request...")
+    results = _ask_gemini(prompt)
 
-        for item in results:
-            try:
-                title = _clean(item.get("title", ""))
-                company = _clean(item.get("company", "N/A"))
-                location = _clean(item.get("location", "Nigeria"))
-                stipend = _clean(item.get("stipend", "See listing"))
-                apply_url = _clean(item.get("apply_url", ""))
-                deadline = _clean(item.get("deadline", ""))
+    for item in results:
+        try:
+            title = _clean(item.get("title", ""))
+            company = _clean(item.get("company", "N/A"))
+            location = _clean(item.get("location", "Nigeria"))
+            stipend = _clean(item.get("stipend", "See listing"))
+            apply_url = _clean(item.get("apply_url", ""))
+            deadline = _clean(item.get("deadline", ""))
 
-                if not title or not company:
-                    continue
-
-                fp = _fp(title, company, location)
-                if fp in seen:
-                    continue
-                seen.add(fp)
-
-                display_title = title
-                if deadline:
-                    display_title = f"{title} — Deadline: {deadline}"
-
-                # Fix empty or invalid URLs
-                if not apply_url or apply_url in ["N/A", "TBD", ""]:
-                    apply_url = f"https://www.google.com/search?q={company.replace(' ', '+')}+internship+Nigeria+2026"
-
-                jobs.append(Job(
-                    title=display_title,
-                    company=company,
-                    location=location,
-                    stipend=stipend or "See listing",
-                    application_link=apply_url,
-                    source="🤖 Gemini AI",
-                    job_type="SIWES/Internship",
-                    remote="remote" in location.lower(),
-                    hash=fp,
-                ))
-
-            except Exception as e:
-                logger.error(f"Gemini result error: {e}")
+            if not title or not company:
                 continue
 
-        # Respect free tier rate limit
-        time.sleep(5)
+            fp = _fp(title, company, location)
+            if fp in seen:
+                continue
+            seen.add(fp)
+
+            display_title = title
+            if deadline:
+                display_title = f"{title} — Deadline: {deadline}"
+
+            # Fix empty URLs
+            if not apply_url or apply_url in ["N/A", "TBD", ""]:
+                apply_url = (
+                    f"https://www.google.com/search?q="
+                    f"{company.replace(' ', '+')}+"
+                    f"internship+Nigeria+2026"
+                )
+
+            jobs.append(Job(
+                title=display_title,
+                company=company,
+                location=location,
+                stipend=stipend or "See listing",
+                application_link=apply_url,
+                source="🤖 Gemini AI",
+                job_type="SIWES/Internship",
+                remote="remote" in location.lower(),
+                hash=fp,
+            ))
+
+        except Exception as e:
+            logger.error(f"Gemini result error: {e}")
+            continue
 
     logger.info(f"Gemini AI: {len(jobs)} jobs found")
     return jobs
