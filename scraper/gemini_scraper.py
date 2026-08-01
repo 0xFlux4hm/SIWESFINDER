@@ -17,9 +17,8 @@ logger = logging.getLogger(__name__)
 
 GEMINI_URL = (
     "https://generativelanguage.googleapis.com/v1beta/models/"
-    ""gemini-2.0-flash-lite:generateContent""
+    "gemini-2.0-flash-lite:generateContent"
 )
-
 # Rotate prompts based on time of day
 # 8AM = SIWES focus, 2PM = Tech focus, 8PM = Banking/Oil focus
 def _get_prompt():
